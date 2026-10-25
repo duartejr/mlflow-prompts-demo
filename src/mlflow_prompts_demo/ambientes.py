@@ -18,6 +18,9 @@ Sem sufixo, valem para os dois.
 
 Em cada servidor o alias tem o nome do ambiente: @staging no de staging,
 @production no de production.
+
+Um arquivo `.env` na raiz do repositório é carregado automaticamente (variáveis
+já definidas no ambiente têm prioridade), então `source .env` não é necessário.
 """
 from __future__ import annotations
 
@@ -25,6 +28,10 @@ import os
 from contextlib import contextmanager
 
 import mlflow
+
+from dotenv import find_dotenv, load_dotenv
+
+load_dotenv(find_dotenv(usecwd=True), override=False)
 
 AMBIENTES = ("staging", "production")
 _CREDENCIAIS = ("MLFLOW_TRACKING_USERNAME", "MLFLOW_TRACKING_PASSWORD", "MLFLOW_TRACKING_TOKEN")
@@ -40,7 +47,9 @@ def uri(ambiente: str) -> str:
     valor = _valor("MLFLOW_TRACKING_URI", ambiente)
     if not valor:
         raise SystemExit(
-            f"Defina MLFLOW_TRACKING_URI (um servidor) ou MLFLOW_TRACKING_URI_{ambiente.upper()}."
+            f"Defina MLFLOW_TRACKING_URI (um servidor) ou MLFLOW_TRACKING_URI_{ambiente.upper()} "
+            "no ambiente ou num arquivo .env na raiz do repositório. Se você usou `source .env`, "
+            "lembre que linhas sem `export` não chegam a outros processos."
         )
     return valor
 

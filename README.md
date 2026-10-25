@@ -253,6 +253,13 @@ Se alguém cria uma versão de uma **peça** pela interface (botão *Create prom
 
 Para descartar uma edição: `prompts-sync --descartar-interface <peça>`.
 
+**Sem esperar o CI.** Na sua máquina, `uv run prompts-drift --abrir-pr` faz o mesmo que o
+workflow: decompõe, escreve os arquivos, commita só `prompts/` no branch fixo
+`prompts/edicoes-interface`, faz push e abre o PR com o GitHub CLI (`gh auth login` antes).
+Rodar de novo **atualiza o mesmo PR**. Você volta para o branch onde estava, e outras
+mudanças do seu working tree não entram no commit. O branch é regenerado a cada execução
+(`push --force`), como no workflow.
+
 ## Editar o prompt final (para quem não é técnico)
 
 Quem não conhece a estrutura de placeholders pode editar o **texto completo** do produto, que
@@ -347,10 +354,21 @@ uv run pytest -q
 
 Interface: http://127.0.0.1:5001 (staging) e http://127.0.0.1:5002 (production).
 
-Para usar com o seu repositório e um servidor:
+Para usar com o seu repositório e um servidor, crie um `.env` na raiz (já está no
+`.gitignore`). Ele é carregado automaticamente pelos comandos; não precisa de `source`:
 
 ```bash
-export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
+# .env
+MLFLOW_TRACKING_URI=http://127.0.0.1:5000
+# ou, com dois servidores:
+# MLFLOW_TRACKING_URI_STAGING=http://127.0.0.1:5001
+# MLFLOW_TRACKING_URI_PRODUCTION=http://127.0.0.1:5002
+```
+
+Variáveis já definidas no ambiente têm prioridade sobre o `.env`. Se preferir `source .env`,
+use `set -a; source .env; set +a`: linhas sem `export` não chegam aos comandos.
+
+```bash
 uv run mlflow server --backend-store-uri sqlite:///mlflow.db --port 5000   # outro terminal
 uv run prompts-check
 uv run prompts-sync
@@ -368,7 +386,7 @@ uv run prompts-apply
 | `prompts-promote [--only P] [--resumo ARQ]` | staging (leitura) | `@staging` → `producao.lock.json` |
 | `prompts-apply` | production | lock → `@production`, com conferência |
 | `prompts-reject --only P --motivo M [--para-sha S] [--aplicar]` | production | reprova no lock (e aplica) |
-| `prompts-drift [--corrigir] [--corpo-pr ARQ]` | ambos | edições da interface → decomposição, arquivos, corpo do PR |
+| `prompts-drift [--corrigir] [--corpo-pr ARQ] [--abrir-pr]` | ambos | edições da interface → decomposição, arquivos, corpo do PR; com `--abrir-pr`, também commit, push e PR (local, via `gh`) |
 | `prompts-pull --only P [--version N]` | staging | uma versão → arquivo (uso manual) |
 | `atendimento-demo [--produto P] [--ambiente A] [--so-fontes]` | o do ambiente | exemplo da aplicação |
 

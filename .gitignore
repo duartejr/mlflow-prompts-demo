@@ -16,3 +16,6 @@ mlruns/
 
 # demonstração local (scripts/demo.sh)
 .demo/
+
+# variáveis locais (endereços e credenciais do MLflow)
+.env

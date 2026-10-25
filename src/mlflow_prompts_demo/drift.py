@@ -14,11 +14,15 @@ Modos:
     uv run prompts-drift --corrigir --corpo-pr drift.md
         # escreve arquivos + corpo do PR; o workflow abre/atualiza UM PR
         # (branch fixo prompts/edicoes-interface), então não duplica.
+    uv run prompts-drift --abrir-pr
+        # local: --corrigir + commit no branch fixo + push + PR (gh CLI).
+        # Rodar de novo atualiza o mesmo PR.
 """
 from __future__ import annotations
 
 import argparse
 import difflib
+import tempfile
 
 import mlflow
 
@@ -193,12 +197,27 @@ def drift(corrigir: bool, corpo_pr: str | None) -> int:
     return 1 if (itens and not corrigir) else 0
 
 
+BRANCH_PR = "prompts/edicoes-interface"
+TITULO_PR = "Edições feitas na interface do MLflow"
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--corrigir", action="store_true", help="decompõe, escreve arquivos e registra em staging")
     p.add_argument("--corpo-pr", help="arquivo onde gravar o corpo do PR (Markdown)")
+    p.add_argument("--abrir-pr", action="store_true",
+                   help=f"implica --corrigir; commita prompts/ no branch {BRANCH_PR}, faz push e abre/atualiza o PR (gh)")
     a = p.parse_args()
-    raise SystemExit(drift(a.corrigir, a.corpo_pr))
+
+    if not a.abrir_pr:
+        raise SystemExit(drift(a.corrigir, a.corpo_pr))
+
+    from .pr_local import abrir_pr
+
+    corpo = a.corpo_pr or tempfile.NamedTemporaryFile(prefix="drift-", suffix=".md", delete=False).name
+    codigo = drift(True, corpo)
+    abrir_pr(BRANCH_PR, TITULO_PR, corpo, ["prompts"], TITULO_PR)
+    raise SystemExit(codigo)
 
 
 if __name__ == "__main__":
