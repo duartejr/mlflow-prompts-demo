@@ -1,0 +1,86 @@
+# Propor promoção: escreve em producao.lock.json o que está em @staging e abre um PR.
+# A descrição é obrigatória. O merge do PR dispara o prompts-apply (com aprovação).
+name: prompts-promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      descricao:
+        description: "Por que promover (obrigatório, mínimo 30 caracteres)"
+        required: true
+      prompt:
+        description: "Só esta peça (ex.: atendimento-formato-default). Vazio = todas."
+        required: false
+        default: ""
+
+concurrency:
+  group: mlflow-prompts
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+  MLFLOW_TRACKING_URI_STAGING: ${{ secrets.MLFLOW_TRACKING_URI_STAGING }}
+  MLFLOW_TRACKING_URI_PRODUCTION: ${{ secrets.MLFLOW_TRACKING_URI_PRODUCTION }}
+  MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+  MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+  MLFLOW_TRACKING_USERNAME_STAGING: ${{ secrets.MLFLOW_TRACKING_USERNAME_STAGING }}
+  MLFLOW_TRACKING_PASSWORD_STAGING: ${{ secrets.MLFLOW_TRACKING_PASSWORD_STAGING }}
+  MLFLOW_TRACKING_USERNAME_PRODUCTION: ${{ secrets.MLFLOW_TRACKING_USERNAME_PRODUCTION }}
+  MLFLOW_TRACKING_PASSWORD_PRODUCTION: ${{ secrets.MLFLOW_TRACKING_PASSWORD_PRODUCTION }}
+  MLFLOW_DISABLE_AGENT_HINT: "1"
+
+jobs:
+  propor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Conferir a descrição
+        env:
+          DESCRICAO: ${{ inputs.descricao }}
+        run: |
+          if [ "$(printf '%s' "$DESCRICAO" | tr -d '[:space:]' | wc -c)" -lt 30 ]; then
+            echo "::error::Descreva o motivo da promoção (mínimo 30 caracteres)."; exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+
+      - name: Propor o lock a partir de @staging
+        env:
+          PROMPT: ${{ inputs.prompt }}
+        run: |
+          args=(--resumo "$RUNNER_TEMP/resumo.md")
+          if [ -n "$PROMPT" ]; then args+=(--only "$PROMPT"); fi
+          uv run prompts-promote "${args[@]}"
+
+      - name: Montar o corpo do PR
+        env:
+          DESCRICAO: ${{ inputs.descricao }}
+        run: |
+          {
+            echo "## Descrição"
+            printf '%s\n\n' "$DESCRICAO"
+            echo "Solicitado por @${GITHUB_ACTOR} via workflow prompts-promote."
+            echo
+            echo "## O que muda em production"
+            cat "$RUNNER_TEMP/resumo.md"
+            echo
+            echo "O merge deste PR aplica o lock no servidor de production (workflow prompts-apply, com aprovação)."
+          } > "$RUNNER_TEMP/corpo.md"
+          cat "$RUNNER_TEMP/corpo.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Abrir/atualizar o PR de promoção
+        uses: peter-evans/create-pull-request@v7
+        with:
+          # Com o GITHUB_TOKEN o PR NÃO dispara o prompts-pr; use um token de GitHub App ou PAT.
+          token: ${{ secrets.PROMPTS_BOT_TOKEN || github.token }}
+          branch: prompts/promocao
+          commit-message: "Promoção para production"
+          title: "Promoção de prompts para production"
+          body-path: ${{ runner.temp }}/corpo.md
+          add-paths: producao.lock.json

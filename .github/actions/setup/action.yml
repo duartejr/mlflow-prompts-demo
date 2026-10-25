@@ -1,0 +1,11 @@
+name: Preparar ambiente de prompts
+description: Instala uv e as dependências do projeto (uv.lock).
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+    - name: Instalar dependências
+      shell: bash
+      run: uv sync --locked

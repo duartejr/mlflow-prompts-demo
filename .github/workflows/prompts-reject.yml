@@ -1,0 +1,71 @@
+# Reprova a versão de uma peça que está em production: volta para a anterior,
+# registra a reprovação no lock (commit direto em main) e aplica.
+# Emergência: não passa por PR. O bot precisa poder dar push em main
+# (bypass da branch protection para o GitHub App/PAT do PROMPTS_BOT_TOKEN).
+name: prompts-reject
+
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: "Peça em production (ex.: atendimento-formato-default)"
+        required: true
+      motivo:
+        description: "Motivo (obrigatório; fica registrado no lock)"
+        required: true
+      para_sha:
+        description: "Commit da versão para onde voltar (vazio = anterior válida)"
+        required: false
+        default: ""
+
+concurrency:
+  group: mlflow-prompts
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+  MLFLOW_TRACKING_URI_STAGING: ${{ secrets.MLFLOW_TRACKING_URI_STAGING }}
+  MLFLOW_TRACKING_URI_PRODUCTION: ${{ secrets.MLFLOW_TRACKING_URI_PRODUCTION }}
+  MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+  MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+  MLFLOW_TRACKING_USERNAME_STAGING: ${{ secrets.MLFLOW_TRACKING_USERNAME_STAGING }}
+  MLFLOW_TRACKING_PASSWORD_STAGING: ${{ secrets.MLFLOW_TRACKING_PASSWORD_STAGING }}
+  MLFLOW_TRACKING_USERNAME_PRODUCTION: ${{ secrets.MLFLOW_TRACKING_USERNAME_PRODUCTION }}
+  MLFLOW_TRACKING_PASSWORD_PRODUCTION: ${{ secrets.MLFLOW_TRACKING_PASSWORD_PRODUCTION }}
+  MLFLOW_DISABLE_AGENT_HINT: "1"
+
+jobs:
+  reprovar:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PROMPTS_BOT_TOKEN || github.token }}
+      - uses: ./.github/actions/setup
+
+      - name: Reprovar no lock
+        env:
+          PROMPT: ${{ inputs.prompt }}
+          MOTIVO: ${{ inputs.motivo }}
+          PARA: ${{ inputs.para_sha }}
+        run: |
+          args=(--only "$PROMPT" --motivo "$MOTIVO")
+          if [ -n "$PARA" ]; then args+=(--para-sha "$PARA"); fi
+          uv run prompts-reject "${args[@]}"
+
+      - name: Registrar no Git
+        env:
+          PROMPT: ${{ inputs.prompt }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Reprova ${PROMPT} em production (por ${GITHUB_ACTOR})"
+          git push origin HEAD:main
+
+      - name: Aplicar em production
+        run: uv run prompts-apply | tee -a "$GITHUB_STEP_SUMMARY"

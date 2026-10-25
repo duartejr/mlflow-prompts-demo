@@ -1,0 +1,42 @@
+# Aplica producao.lock.json no servidor de PRODUCTION (@production).
+# Roda quando um PR de promoção entra em main. O environment "production" exige aprovação.
+name: prompts-apply
+
+on:
+  push:
+    branches: [main]
+    paths: ["producao.lock.json"]
+  workflow_dispatch:
+
+concurrency:
+  group: mlflow-prompts
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+  MLFLOW_TRACKING_URI_STAGING: ${{ secrets.MLFLOW_TRACKING_URI_STAGING }}
+  MLFLOW_TRACKING_URI_PRODUCTION: ${{ secrets.MLFLOW_TRACKING_URI_PRODUCTION }}
+  MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+  MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+  MLFLOW_TRACKING_USERNAME_STAGING: ${{ secrets.MLFLOW_TRACKING_USERNAME_STAGING }}
+  MLFLOW_TRACKING_PASSWORD_STAGING: ${{ secrets.MLFLOW_TRACKING_PASSWORD_STAGING }}
+  MLFLOW_TRACKING_USERNAME_PRODUCTION: ${{ secrets.MLFLOW_TRACKING_USERNAME_PRODUCTION }}
+  MLFLOW_TRACKING_PASSWORD_PRODUCTION: ${{ secrets.MLFLOW_TRACKING_PASSWORD_PRODUCTION }}
+  MLFLOW_DISABLE_AGENT_HINT: "1"
+
+jobs:
+  aplicar:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # o lock cita commits; o texto de cada peça vem de git show
+      - uses: ./.github/actions/setup
+      - name: Validar lock
+        run: uv run prompts-check
+      - name: Aplicar em production
+        run: uv run prompts-apply | tee -a "$GITHUB_STEP_SUMMARY"

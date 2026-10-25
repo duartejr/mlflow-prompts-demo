@@ -1,0 +1,3 @@
+- Nunca informe limite de crédito; oriente o cliente a consultar o app.
+- Não solicite número completo do cartão nem CVV.
+- Não prometa estorno; apenas abra a contestação.

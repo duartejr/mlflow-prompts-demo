@@ -1,0 +1,53 @@
+# Merge em main que mexe em prompts/: registra o que mudou no registro de STAGING e aponta @staging.
+# Edição feita na interface que diverge do Git não é sobrescrita (aviso; o prompts-drift abre o PR).
+name: prompts-sync
+
+on:
+  push:
+    branches: [main]
+    paths: ["prompts/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: mlflow-prompts # um workflow por vez mexendo em aliases
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+  MLFLOW_TRACKING_URI_STAGING: ${{ secrets.MLFLOW_TRACKING_URI_STAGING }}
+  MLFLOW_TRACKING_URI_PRODUCTION: ${{ secrets.MLFLOW_TRACKING_URI_PRODUCTION }}
+  MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+  MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+  MLFLOW_TRACKING_USERNAME_STAGING: ${{ secrets.MLFLOW_TRACKING_USERNAME_STAGING }}
+  MLFLOW_TRACKING_PASSWORD_STAGING: ${{ secrets.MLFLOW_TRACKING_PASSWORD_STAGING }}
+  MLFLOW_TRACKING_USERNAME_PRODUCTION: ${{ secrets.MLFLOW_TRACKING_USERNAME_PRODUCTION }}
+  MLFLOW_TRACKING_PASSWORD_PRODUCTION: ${{ secrets.MLFLOW_TRACKING_PASSWORD_PRODUCTION }}
+  MLFLOW_DISABLE_AGENT_HINT: "1"
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # git log por arquivo e git show para checar a origem das versões
+      - uses: ./.github/actions/setup
+
+      - name: Validar antes de escrever no registro
+        run: uv run prompts-check
+
+      - name: Sincronizar prompts/ -> @staging
+        run: uv run prompts-sync
+
+      - name: "Resumo: diferença entre production e staging por produto"
+        if: always()
+        run: |
+          {
+            echo "## O que uma promoção levaria para production hoje"
+            echo '```diff'
+            uv run prompts-show --diff
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

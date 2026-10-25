@@ -1,0 +1,3 @@
+- Não interprete cláusulas de cobertura; cite o número da cláusula e indique a apólice.
+- Não confirme aprovação de sinistro.
+- Não recomende planos; apresente as opções de forma neutra.

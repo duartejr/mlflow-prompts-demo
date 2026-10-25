@@ -1,0 +1,64 @@
+# De hora em hora: edições feitas na interface do MLflow viram UM PR (branch fixo,
+# então não duplica: o mesmo PR é atualizado enquanto estiver aberto).
+#   - prompt final editado (montado-*) -> decomposto nas peças, já em @staging
+#   - peça editada                      -> texto levado para o arquivo
+# Falha se encontrar edição feita direto no servidor de production.
+name: prompts-drift
+
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: mlflow-prompts
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+  MLFLOW_TRACKING_URI_STAGING: ${{ secrets.MLFLOW_TRACKING_URI_STAGING }}
+  MLFLOW_TRACKING_URI_PRODUCTION: ${{ secrets.MLFLOW_TRACKING_URI_PRODUCTION }}
+  MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+  MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+  MLFLOW_TRACKING_USERNAME_STAGING: ${{ secrets.MLFLOW_TRACKING_USERNAME_STAGING }}
+  MLFLOW_TRACKING_PASSWORD_STAGING: ${{ secrets.MLFLOW_TRACKING_PASSWORD_STAGING }}
+  MLFLOW_TRACKING_USERNAME_PRODUCTION: ${{ secrets.MLFLOW_TRACKING_USERNAME_PRODUCTION }}
+  MLFLOW_TRACKING_PASSWORD_PRODUCTION: ${{ secrets.MLFLOW_TRACKING_PASSWORD_PRODUCTION }}
+  MLFLOW_DISABLE_AGENT_HINT: "1"
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+
+      - name: Decompor e trazer edições para os arquivos
+        id: drift
+        run: |
+          set +e
+          uv run prompts-drift --corrigir --corpo-pr "$RUNNER_TEMP/corpo.md"
+          echo "codigo=$?" >> "$GITHUB_OUTPUT"
+          cat "$RUNNER_TEMP/corpo.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Abrir/atualizar o PR de edições
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.PROMPTS_BOT_TOKEN || github.token }}
+          branch: prompts/edicoes-interface
+          commit-message: "Edições feitas na interface do MLflow"
+          title: "Edições feitas na interface do MLflow"
+          body-path: ${{ runner.temp }}/corpo.md
+          add-paths: prompts/**
+
+      - name: Falhar se houve edição direto em production
+        if: steps.drift.outputs.codigo != '0'
+        run: |
+          echo "::error::Há versões criadas direto no servidor de production (veja o resumo)."
+          exit 1

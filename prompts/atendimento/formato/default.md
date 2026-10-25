@@ -1,0 +1,2 @@
+- Responda em português, em no máximo 5 frases.
+- Se não souber a resposta, diga isso e ofereça transferir para um atendente.
