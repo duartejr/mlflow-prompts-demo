@@ -7,6 +7,10 @@ Para cada seção, procura-se, com o mesmo alias:
     2. <dominio>-<secao>-default     (padrão da seção)
 
 Se nenhum dos dois existir, a seção é obrigatória e o produto está incompleto: erro.
+
+O base pode usar Jinja ({% if canal == "whatsapp" %}). As variáveis de execução
+(produto, canal) não são seções; as demais saem do próprio template, inclusive
+as usadas só dentro de {% %} (ver variaveis.py).
 """
 from __future__ import annotations
 
@@ -16,10 +20,13 @@ import mlflow
 
 from .ambientes import servidor
 from .registry import listar_arquivos, pasta_prompts
+from .variaveis import renderizar, variaveis
 
 DOMINIO = "atendimento"
 BASE = f"{DOMINIO}-base"
 PADRAO = "default"
+EXECUCAO = {"produto", "canal"}  # variáveis preenchidas na chamada, não seções
+CANAIS = ("whatsapp", "email")
 
 
 @dataclass
@@ -50,25 +57,31 @@ def carregar_secao(secao: str, produto: str, ambiente: str, cache_ttl: float | N
     )
 
 
-def montar(produto: str, ambiente: str = "production", cache_ttl: float | None = None) -> PromptMontado:
+def secoes(template_base: str) -> list[str]:
+    return sorted(variaveis(template_base) - EXECUCAO)
+
+
+def montar(produto: str, ambiente: str = "production", cache_ttl: float | None = None,
+           canal: str | None = None) -> PromptMontado:
     """Monta no servidor do ambiente, com o alias do ambiente (@staging ou @production).
 
     cache_ttl=None usa o cache padrão do MLflow (bom para a aplicação, que roda
     num ambiente só); os scripts passam 0 para ler o estado real.
+    canal só é necessário se o base usar {{ canal }}; se usar e faltar, é erro.
     """
     with servidor(ambiente):
         base = _carregar(f"prompts:/{BASE}@{ambiente}", cache_ttl)
         fontes = {"base": f"{base.name}@v{base.version}"}
-        valores = {"produto": produto}
+        valores = {"produto": produto} | ({"canal": canal} if canal else {})
         pecas = {}
 
-        for secao in sorted(base.variables - {"produto"}):
+        for secao in secoes(base.template):
             prompt = carregar_secao(secao, produto, ambiente, cache_ttl)
             valores[secao] = prompt.template.strip()
             fontes[secao] = f"{prompt.name}@v{prompt.version}"
             pecas[secao] = prompt
 
-    return PromptMontado(produto, ambiente, base.format(**valores), fontes, base, pecas)
+    return PromptMontado(produto, ambiente, renderizar(base.template, **valores), fontes, base, pecas)
 
 
 def produtos() -> list[str]:

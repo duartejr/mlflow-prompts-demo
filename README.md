@@ -40,7 +40,8 @@ Testado com MLflow 3.17.2 e Python 3.12. Demonstração local completa: `./scrip
 11. [Configuração no GitHub](#configuração-no-github)
 12. [Rodando localmente](#rodando-localmente)
 13. [Comandos](#comandos)
-14. [Limitações conhecidas](#limitações-conhecidas)
+14. [Jinja nos prompts](#jinja-nos-prompts)
+15. [Limitações conhecidas](#limitações-conhecidas)
 
 ---
 
@@ -61,6 +62,7 @@ src/mlflow_prompts_demo/
 ├── ambientes.py   # servidor de cada ambiente (um ou dois MLflow)
 ├── registry.py    # nomes, tags, Git, buscas no registro
 ├── composicao.py  # monta base + seções, com fallback para o padrão
+├── variaveis.py   # variáveis e renderização nos modos nativo e Jinja
 ├── verificar.py   # prompts-check:   valida e monta SEM MLflow (PR)
 ├── sync.py        # prompts-sync:    Git -> registro de staging (@staging)
 ├── propor.py      # prompts-promote: @staging -> producao.lock.json (vira PR)
@@ -73,6 +75,7 @@ src/mlflow_prompts_demo/
 ├── puxar.py       # prompts-pull:    uma versão do registro -> arquivo (manual)
 └── app.py         # atendimento-demo: exemplo de uso na aplicação
 tests/             # testes offline (pytest)
+exemplos/jinja/    # base.md com Jinja e demo.py (como o MLflow trata o template)
 scripts/demo.sh    # demonstração ponta a ponta com servidores locais
 .github/
 ├── actions/setup/ # uv + dependências
@@ -372,6 +375,44 @@ uv run prompts-apply
 | `prompts-pull --only P [--version N]` | staging | uma versão → arquivo (uso manual) |
 | `atendimento-demo [--produto P] [--ambiente A] [--so-fontes]` | o do ambiente | exemplo da aplicação |
 
+## Jinja nos prompts
+
+O MLflow formata um prompt de dois jeitos. Sem `{% %}` no texto, ele só troca `{{ variavel }}`
+e dá erro se faltar alguma (`Missing variables`). Com `{% %}`, ele renderiza com o
+`SandboxedEnvironment` do Jinja2, o que permite condição e laço no próprio `.md`:
+
+```markdown
+## Formato
+{% if canal == "whatsapp" -%}
+- Responda em no máximo 3 frases curtas, sem listas nem links.
+{% else -%}
+{{ formato }}
+{% endif %}
+## Restrições
+{{ restricoes }}
+{% for regra in regras_comuns -%}
+- {{ regra }}
+{% endfor -%}
+```
+
+`uv run python exemplos/jinja/demo.py` registra esse arquivo num MLflow local, carrega de volta
+e mostra o que muda no modo Jinja (testado com MLflow 3.17.2):
+
+| | Modo nativo | Modo Jinja |
+| --- | --- | --- |
+| Variável faltando | erro `Missing variables` | **vira texto vazio, sem erro** (o `if` cai no `else`, o `for` não gera nada) |
+| `prompt.variables` | correto | **lê `{{ }}` com regex:** lista `regra` (variável do laço) e não lista `canal` nem `regras_comuns` |
+| `{% include %}` / `{% extends %}` | não se aplica | não funciona (`no loader for this environment specified`) |
+| Acesso a atributos internos | não se aplica | bloqueado pelo sandbox (`SecurityError`) |
+
+Por isso o projeto não usa `prompt.variables` nem `prompt.format` direto para montar:
+`variaveis.py` lista as variáveis com `jinja2.meta.find_undeclared_variables` e renderiza com
+`StrictUndefined`, que transforma a variável faltando em erro. `composicao.py` e o
+`prompts-check` usam essas funções; `produto` e `canal` são variáveis de execução, e as demais
+são seções. Se o base usa `{{ canal }}`, o `prompts-check` monta cada produto em cada canal
+(`whatsapp` e `email`) e mostra o diff de todos no PR. A composição entre arquivos continua na
+aplicação, porque o `include` do Jinja não funciona no registro.
+
 ## Limitações conhecidas
 
 - **Tempo de detecção:** o `prompts-drift` roda de hora em hora. Para reagir na hora, dá para
@@ -383,5 +424,7 @@ uv run prompts-apply
   quem a criou ("autor desconhecido").
 - **Histórico da reprovação:** a versão anterior é procurada nos commits do lock; o lock
   precisa estar commitado.
+- **Jinja e decomposição:** a decomposição de edições feitas na interface supõe um base só com
+  `{{ variáveis }}`; com `{% %}` no base, a edição do prompt final precisa ser levada à mão.
 - **Escopo:** um domínio de prompts (`atendimento`) e prompts de texto. Prompts de chat exigem
   adaptar a montagem.

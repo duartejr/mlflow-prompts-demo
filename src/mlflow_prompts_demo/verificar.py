@@ -2,13 +2,15 @@
 
 Feito para o PR: lê os arquivos (do working tree ou de um ref do Git), aplica a
 mesma regra de montagem da aplicação (override do produto, senão default) e
-usa o próprio PromptVersion do MLflow para formatar, então o texto é idêntico
+formata como a aplicação (variaveis.renderizar), então o texto é idêntico
 ao que a aplicação vai montar depois do sync.
 
 Checagens (erro = código de saída 1):
   - existe <dominio>/base.md;
   - todo produto resolve todas as seções do base (override ou default);
   - blocos de seção não têm {{ variáveis }};
+  - o base renderiza sem variável faltando (com StrictUndefined, também no
+    modo Jinja); se o base usa {{ canal }}, cada produto é montado em cada canal;
 Avisos:
   - pasta de seção que o base não usa.
 
@@ -33,11 +35,13 @@ import re
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
-from mlflow.entities.model_registry import PromptVersion
+import jinja2
+from mlflow.exceptions import MlflowException
 
-from .composicao import DOMINIO, PADRAO
+from .composicao import CANAIS, DOMINIO, PADRAO, secoes as secoes_do_base
 from .lock import ler_lock, resumo_mudancas, validar_lock
 from .registry import git, pasta_prompts
+from .variaveis import renderizar, variaveis
 
 BASE = "base"
 
@@ -77,8 +81,8 @@ def compor(arquivos: dict[PurePosixPath, str]) -> Resultado:
     if base_txt is None:
         r.erros.append(f"{DOMINIO}/{BASE}.md não existe")
         return r
-    base = PromptVersion(name=f"{DOMINIO}-{BASE}", version=1, template=base_txt)
-    secoes = sorted(base.variables - {"produto"})
+    secoes = secoes_do_base(base_txt)
+    canais = CANAIS if "canal" in variaveis(base_txt) else (None,)
 
     pecas: dict[tuple[str, str], str] = {}  # (secao, produto|default) -> texto
     for caminho, texto in arquivos.items():
@@ -86,9 +90,8 @@ def compor(arquivos: dict[PurePosixPath, str]) -> Resultado:
             continue
         secao, alvo = caminho.parts[0], caminho.stem
         pecas[(secao, alvo)] = texto
-        variaveis = PromptVersion(name="x", version=1, template=texto).variables
-        if variaveis:
-            r.erros.append(f"{DOMINIO}/{caminho}: blocos de seção não podem ter variáveis ({', '.join(sorted(variaveis))})")
+        if usadas := variaveis(texto):
+            r.erros.append(f"{DOMINIO}/{caminho}: blocos de seção não podem ter variáveis ({', '.join(sorted(usadas))})")
     for secao in sorted({s for s, _ in pecas} - set(secoes)):
         r.avisos.append(f"{DOMINIO}/{secao}/ existe, mas o base não tem {{{{ {secao} }}}}")
 
@@ -103,9 +106,16 @@ def compor(arquivos: dict[PurePosixPath, str]) -> Resultado:
                     break
             else:
                 r.erros.append(f"produto '{produto}': seção '{secao}' sem {DOMINIO}/{secao}/{produto}.md e sem {PADRAO}.md")
-        if len(fontes) == len(secoes) + 1:
-            r.textos[produto] = base.format(**valores)
-            r.fontes[produto] = fontes
+        if len(fontes) != len(secoes) + 1:
+            continue
+        for canal in canais:
+            chave = produto if canal is None else f"{produto} · {canal}"
+            try:
+                r.textos[chave] = renderizar(base_txt, **valores, **({"canal": canal} if canal else {}))
+            except (jinja2.UndefinedError, MlflowException) as e:
+                r.erros.append(f"produto '{chave}': o base não renderiza ({e})")
+                continue
+            r.fontes[chave] = fontes
     return r
 
 
